@@ -35,11 +35,14 @@ try:
 except ImportError:
     from yaml import Dumper, Loader
 
+
 class YamlConstructorError(yaml.constructor.ConstructorError):
     "Error constructing a YAML tag"
 
+
 class YamlRepresenterError(yaml.representer.RepresenterError):
     "Error representing a python type"
+
 
 class YamlConversionError(yaml.YAMLError):
     "Error parsing yaml"
@@ -159,6 +162,7 @@ class PrimitiveConverter(Converter):
     Converter for primitive objects, allows for sanity checks to be
     imposed on the data beyond standard YAML syntax.
     """
+
     def bind_loader(self, loader: Loader):
         self._base_constructors: dict[str, Callable] = {}
         for tag, constructor in loader.yaml_constructors.items():
@@ -174,30 +178,36 @@ class PrimitiveConverter(Converter):
     def construct_node(self, loader: Loader, node: yaml.Node) -> _Convertable:
         if constructor := self._base_constructors.get(node.tag, None):
             return constructor(loader, node)
-        raise YamlConstructorError(f"Got tag `{node.tag}` with no registered"
-                                    " converter. If it is meant to be a string"
-                                    " it requires quotes, otherwise a"
-                                    " converter will need to be registered.", 
-                                    context_mark=node.start_mark)
-    
+        raise YamlConstructorError(
+            f"Got tag `{node.tag}` with no registered"
+            " converter. If it is meant to be a string"
+            " it requires quotes, otherwise a"
+            " converter will need to be registered.",
+            context_mark=node.start_mark,
+        )
+
     def represent_node(self, loader: Loader, value: _Convertable) -> _Convertable:
         if representer := self._base_representers.get(type(value), None):
             return representer(loader, value)
-        raise YamlRepresenterError(f"Got type `{type(value)}` without a"
-                                    " registered converter. A converter will"
-                                    " need to be registered.")
+        raise YamlRepresenterError(
+            f"Got type `{type(value)}` without a"
+            " registered converter. A converter will"
+            " need to be registered."
+        )
+
 
 @dataclass(kw_only=True)
 class SensiblePrimitives(PrimitiveConverter):
     """
     Converter for primitive objects with sensible checking by default.
     """
+
     strict_keys: bool = True
-    'Disallow duplicate keys in mappings'
+    "Disallow duplicate keys in mappings"
     strict_bools: bool = True
-    'Disallow bools other than `true` or `false` (case-insensitive)'
+    "Disallow bools other than `true` or `false` (case-insensitive)"
     strict_numbers: bool = True
-    'Disallow sexagesimal number (e.g. 42:45)'
+    "Disallow sexagesimal number (e.g. 42:45)"
 
     def construct_mapping(self, loader: Loader, node: yaml.MappingNode) -> _Convertable:
         if self.strict_keys:
@@ -211,26 +221,25 @@ class SensiblePrimitives(PrimitiveConverter):
                     )
                 seen.append(key)
         return super().construct_mapping(loader, node)
-    
+
     def construct_scalar(self, loader: Loader, node: yaml.ScalarNode) -> Any:
         value = super().construct_scalar(loader, node)
         if self.strict_bools:
             if isinstance(value, bool) and node.value.lower() not in ("true", "false"):
                 raise YamlConstructorError(
-                        f"Unsafe bool '{node.value}' detected. Use `true` or"
-                         " `false` for bools, or quote if it is intended to be"
-                         " a string.",
-                        context_mark=node.start_mark,
-                    )
+                    f"Unsafe bool '{node.value}' detected. Use `true` or"
+                    " `false` for bools, or quote if it is intended to be"
+                    " a string.",
+                    context_mark=node.start_mark,
+                )
         if self.strict_numbers:
-            if isinstance(value, (int, float)) and ':' in node.value:
+            if isinstance(value, int | float) and ":" in node.value:
                 raise YamlConstructorError(
-                        f"Unsafe number '{node.value}' detected. This is"
-                         " probably meant to be a string, please quote it.",
-                        context_mark=node.start_mark,
-                    )
-        return super().construct_scalar(loader, node)
-
+                    f"Unsafe number '{node.value}' detected. This is"
+                    " probably meant to be a string, please quote it.",
+                    context_mark=node.start_mark,
+                )
+        return value
 
 
 class ConverterRegistry:

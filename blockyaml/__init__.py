@@ -25,7 +25,7 @@ from .converters import (
 from .parsers import Parser, SimpleParser
 
 assert all(
-    (   
+    (
         Converter,
         ConverterRegistry,
         DataclassConverter,

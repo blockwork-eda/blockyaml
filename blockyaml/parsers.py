@@ -13,19 +13,25 @@
 # limitations under the License.
 
 from collections.abc import Callable
-from io import TextIOWrapper
 from pathlib import Path
 from typing import Any, Generic, Self, TextIO
 
 import yaml
 
-from .converters import Converter, PrimitiveConverter, ConverterRegistry, SensiblePrimitives, YamlConversionError, _Convertable
+from .converters import (
+    Converter,
+    ConverterRegistry,
+    PrimitiveConverter,
+    SensiblePrimitives,
+    YamlConversionError,
+    _Convertable,
+)
 
-# try:
-#     from yaml import CDumper as Dumper
-#     from yaml import CLoader as Loader
-# except ImportError:
-from yaml import Dumper, Loader
+try:
+    from yaml import CDumper as Dumper
+    from yaml import CLoader as Loader
+except ImportError:
+    from yaml import Dumper, Loader
 
 
 class ObjectParser(Generic[_Convertable]):
@@ -72,7 +78,7 @@ class ObjectParser(Generic[_Convertable]):
 
     def dump(self, obj: Any, path: Path | TextIO) -> None:
         """
-        Dump an object to YAML and write it to the path or file handle 
+        Dump an object to YAML and write it to the path or file handle
         provided.
 
         :param obj:  The object to dump
@@ -117,8 +123,11 @@ class Parser:
 
     """
 
-    def __init__(self, registry: ConverterRegistry | None = None, primitive_converter: PrimitiveConverter | None = None):
-
+    def __init__(
+        self,
+        registry: ConverterRegistry | None = None,
+        primitive_converter: PrimitiveConverter | None = None,
+    ):
         class _Loader(Loader):
             ...
 
@@ -131,9 +140,11 @@ class Parser:
         # Bind a primitive converter
         reg_primitive_converter = registry and registry._primitive_converter
         if primitive_converter and reg_primitive_converter:
-            raise ValueError("Both registry and parser specify"
-                             " primitive converter, but only one can"
-                             " be specified!")
+            raise ValueError(
+                "Both registry and parser specify"
+                " primitive converter, but only one can"
+                " be specified!"
+            )
         primitive_converter = primitive_converter or reg_primitive_converter
         if primitive_converter is None:
             primitive_converter = SensiblePrimitives()

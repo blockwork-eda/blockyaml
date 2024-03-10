@@ -12,7 +12,6 @@ readme = "README.md"
 
 [tool.poetry.dependencies]
 python = "^3.9"
-click = "^8.1.3"
 pyyaml = "^6.0"
 typeguard = "^4.1"
 poethepoet = "^0.20.0"
@@ -33,7 +32,7 @@ testpaths = ["tests"]
 shell = "poetry run pytest"
 
 [tool.poe.tasks.lint]
-shell = "poetry run ruff check blockyaml"
+shell = "poetry run ruff format blockyaml && poetry run ruff check blockyaml"
 
 [tool.poe.tasks.docs]
 shell = "poetry run mkdocs build"
