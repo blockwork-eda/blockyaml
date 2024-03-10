@@ -21,8 +21,10 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Generic,
+    Self,
     TypeVar,
     cast,
+    overload,
 )
 
 import yaml
@@ -257,29 +259,50 @@ class ConverterRegistry:
     def __iter__(self):
         yield from self._registry
 
+    @overload
     def register(
         self,
-        Converter: type[Converter],  # noqa: N803
+        converterOrConvertable: type[Converter[_Convertable, Self]],
         *,
         tag: str | None = None,
-    ) -> Callable[[type[_Convertable]], type[_Convertable]]:
+    ) -> Callable[[type[_Convertable]], type[_Convertable]]: ...
+    @overload
+    def register(
+        self,
+        converterOrConvertable: type[_Convertable],
+        *,
+        tag: str | None = None,
+    ) -> Callable[[type[Converter[_Convertable, Self]]], type[Converter[_Convertable, Self]]]: ...
+    def register(
+        self,
+        converterOrConvertable,
+        *,
+        tag: str | None = None,
+    ):
         """
         Register a object for parsing with this parser object.
 
         :param tag: The yaml tag to register as (!ClassName otherwise)
         """
 
-        def wrap(typ: type[_Convertable]) -> type[_Convertable]:
-            inner_tag = f"!{typ.__name__}" if tag is None else tag
+        def wrap(convertableOrConverter):
+            if issubclass(converterOrConvertable, Converter):
+                converter: type[Converter] = converterOrConvertable
+                convertable: type[_Convertable] = convertableOrConverter
+            else:
+                convertable: type[_Convertable] = converterOrConvertable
+                converter: type[Converter] = convertableOrConverter
+
+            inner_tag = f"!{convertable.__name__}" if tag is None else tag
 
             if inner_tag in self._registered_tags:
                 raise RuntimeError(f"Converter already exists for tag `{inner_tag}`")
 
-            if typ in self._registered_typs:
-                raise RuntimeError(f"Converter already exists for type `{typ}`")
+            if convertable in self._registered_typs:
+                raise RuntimeError(f"Converter already exists for type `{convertable}`")
 
-            self._registry.append((inner_tag, typ, Converter))
-            return typ
+            self._registry.append((inner_tag, convertable, converter))
+            return convertableOrConverter
 
         return wrap
 

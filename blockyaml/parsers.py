@@ -14,7 +14,8 @@
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Generic, Self, TextIO
+from typing import Any, Generic, Self, TextIO, overload
+import typing
 
 import yaml
 
@@ -63,7 +64,7 @@ class ObjectParser(Generic[_Convertable]):
 
     def parse_str(self, data: str) -> _Convertable:
         """
-        Parse a YAML string and return any dataclass object it contains.
+        Parse a YAML string and return the object it contains.
 
         :param data: YAML string
         :returns:    Parsed object
@@ -156,24 +157,43 @@ class Parser:
             for tag, typ, converter in registry:
                 self.register(converter, tag=tag)(typ)
 
+    @overload
     def register(
         self,
-        Converter: type[Converter[_Convertable, Self]],  # noqa: N803
+        converterOrConvertable: type[Converter[_Convertable, Self]],
         *,
         tag: str | None = None,
-    ) -> Callable[[type[_Convertable]], type[_Convertable]]:
+    ) -> Callable[[type[_Convertable]], type[_Convertable]]: ...
+    @overload
+    def register(
+        self,
+        converterOrConvertable: type[_Convertable],
+        *,
+        tag: str | None = None,
+    ) -> Callable[[type[Converter[_Convertable, Self]]], type[Converter[_Convertable, Self]]]: ...
+    def register(
+        self,
+        converterOrConvertable,
+        *,
+        tag: str | None = None,
+    ):
         """
         Register a object for parsing with this parser object.
 
         :param tag: The yaml tag to register as (!ClassName otherwise)
         """
-
-        def wrap(typ: type[_Convertable]) -> type[_Convertable]:
-            inner_tag = f"!{typ.__name__}" if tag is None else tag
-            converter = Converter(tag=inner_tag, typ=typ)
-            converter.bind_loader(self.loader)
-            converter.bind_dumper(self.dumper)
-            return typ
+        def wrap(convertableOrConverter):
+            if issubclass(converterOrConvertable, Converter):
+                converter: type[Converter] = converterOrConvertable
+                convertable: type[_Convertable] = convertableOrConverter
+            else:
+                convertable: type[_Convertable] = converterOrConvertable
+                converter: type[Converter] = convertableOrConverter
+            inner_tag = f"!{convertable.__name__}" if tag is None else tag
+            converter_inst = converter(tag=inner_tag, typ=convertable)
+            converter_inst.bind_loader(self.loader)
+            converter_inst.bind_dumper(self.dumper)
+            return convertableOrConverter
 
         return wrap
 
@@ -186,9 +206,9 @@ class Parser:
         """
         return ObjectParser(typ, loader=self.loader, dumper=self.dumper)
 
-    def parse(self, path: Path) -> Any:
+    def parse(self, path: Path | TextIO) -> Any:
         """
-        Parse a YAML file from disk and return any dataclass object it contains.
+        Parse a YAML file from disk and return the object it contains.
 
         :param path: Path to the YAML file to parse
         :returns:    Parsed dataclass object
@@ -197,16 +217,17 @@ class Parser:
 
     def parse_str(self, data: str) -> Any:
         """
-        Parse a YAML string and return any dataclass object it contains.
+        Parse a YAML string and return the object it contains.
 
         :param data: YAML string
         :returns:    Parsed dataclass object
         """
         return self(object).parse_str(data)
 
-    def dump(self, obj: Any, path: Path) -> None:
+    def dump(self, obj: Any, path: Path | TextIO) -> None:
         """
-        Convert the dataclass into YAML and write it to a file
+        Dump an object to YAML and write it to the path or file handle
+        provided.
 
         :param obj:  The object to dump
         :param path: Where to write the YAML to

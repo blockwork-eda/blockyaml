@@ -86,11 +86,11 @@ class TestBasic:
         parser = Parser()
 
         # Test a simple string converter
+        @parser.register(str, tag="!Upper")
         class Capitalise(Converter):
             def construct_scalar(self, loader, node):
                 return node.value.upper()
 
-        parser.register(Capitalise, tag="!Upper")(str)
 
         assert parser.parse_str("!Upper mYGarBaGeCASe") == "MYGARBAGECASE"
 
@@ -150,3 +150,27 @@ class TestBasic:
             parser(Date).parse_str("hello")
 
         assert isinstance(parser(Date).parse_str(dateyaml), Date)
+
+        # Test converter registry
+        class Rect:
+            def __init__(self, x: int, y: int):
+                self.x = x
+                self.y = y
+
+        @parser.register(Rect)
+        class RectConverter(Converter):
+            def construct_mapping(self, loader, node):
+                mapping = loader.construct_mapping(node, deep=True)
+                return Rect(x=mapping['x'], y=mapping['y'])
+            
+            def represent_node(self, dumper, value):
+                return dumper.represent_mapping(self.tag, { 'x': value.x, 'y': value.y})
+
+        rectyaml = """
+        !Rect
+        x: 2
+        y: 4
+        """
+        rect = parser(Rect).parse_str(rectyaml)
+        assert rect.x == 2 and rect.y == 4
+        assert parser.dump_str(rect) == fixup(rectyaml)
