@@ -15,7 +15,6 @@
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Generic, Self, TextIO, overload
-import typing
 
 import yaml
 
@@ -160,20 +159,24 @@ class Parser:
     @overload
     def register(
         self,
-        converterOrConvertable: type[Converter[_Convertable, Self]],
+        converter_convertable: type[Converter[_Convertable, Self]],
         *,
         tag: str | None = None,
-    ) -> Callable[[type[_Convertable]], type[_Convertable]]: ...
+    ) -> Callable[[type[_Convertable]], type[_Convertable]]:
+        ...
+
     @overload
     def register(
         self,
-        converterOrConvertable: type[_Convertable],
+        converter_convertable: type[_Convertable],
         *,
         tag: str | None = None,
-    ) -> Callable[[type[Converter[_Convertable, Self]]], type[Converter[_Convertable, Self]]]: ...
+    ) -> Callable[[type[Converter[_Convertable, Self]]], type[Converter[_Convertable, Self]]]:
+        ...
+
     def register(
         self,
-        converterOrConvertable,
+        converter_convertable,
         *,
         tag: str | None = None,
     ):
@@ -182,18 +185,19 @@ class Parser:
 
         :param tag: The yaml tag to register as (!ClassName otherwise)
         """
-        def wrap(convertableOrConverter):
-            if issubclass(converterOrConvertable, Converter):
-                converter: type[Converter] = converterOrConvertable
-                convertable: type[_Convertable] = convertableOrConverter
+
+        def wrap(convertable_converter, /):
+            if issubclass(converter_convertable, Converter):
+                converter = converter_convertable
+                convertable = convertable_converter
             else:
-                convertable: type[_Convertable] = converterOrConvertable
-                converter: type[Converter] = convertableOrConverter
+                convertable = converter_convertable
+                converter = convertable_converter
             inner_tag = f"!{convertable.__name__}" if tag is None else tag
             converter_inst = converter(tag=inner_tag, typ=convertable)
             converter_inst.bind_loader(self.loader)
             converter_inst.bind_dumper(self.dumper)
-            return convertableOrConverter
+            return convertable_converter
 
         return wrap
 

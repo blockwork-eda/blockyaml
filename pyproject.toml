@@ -32,7 +32,10 @@ testpaths = ["tests"]
 shell = "poetry run pytest"
 
 [tool.poe.tasks.lint]
-shell = "poetry run ruff format blockyaml && poetry run ruff check blockyaml"
+shell = "poetry run ruff format --check blockyaml && poetry run ruff check blockyaml"
+
+[tool.poe.tasks.fmt]
+shell = "poetry run ruff format blockyaml && poetry run ruff check --fix blockyaml"
 
 [tool.poe.tasks.docs]
 shell = "poetry run mkdocs build"

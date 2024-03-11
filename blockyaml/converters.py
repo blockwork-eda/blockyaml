@@ -21,7 +21,6 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Generic,
-    Self,
     TypeVar,
     cast,
     overload,
@@ -172,7 +171,7 @@ class PrimitiveConverter(Converter):
             loader.yaml_constructors[tag] = self.construct
 
     def bind_dumper(self, dumper: Dumper):
-        self._base_representers: dict[str, Callable] = {}
+        self._base_representers: dict[type, Callable] = {}
         for typ, representer in dumper.yaml_representers.items():
             self._base_representers[typ] = representer
             dumper.yaml_representers[typ] = self.represent
@@ -262,20 +261,26 @@ class ConverterRegistry:
     @overload
     def register(
         self,
-        converterOrConvertable: type[Converter[_Convertable, Self]],
+        converter_convertable: type[Converter[_Convertable, "Parser"]],
         *,
         tag: str | None = None,
-    ) -> Callable[[type[_Convertable]], type[_Convertable]]: ...
+    ) -> Callable[[type[_Convertable]], type[_Convertable]]:
+        ...
+
     @overload
     def register(
         self,
-        converterOrConvertable: type[_Convertable],
+        converter_convertable: type[_Convertable],
         *,
         tag: str | None = None,
-    ) -> Callable[[type[Converter[_Convertable, Self]]], type[Converter[_Convertable, Self]]]: ...
+    ) -> Callable[
+        [type[Converter[_Convertable, "Parser"]]], type[Converter[_Convertable, "Parser"]]
+    ]:
+        ...
+
     def register(
         self,
-        converterOrConvertable,
+        converter_convertable,
         *,
         tag: str | None = None,
     ):
@@ -285,13 +290,13 @@ class ConverterRegistry:
         :param tag: The yaml tag to register as (!ClassName otherwise)
         """
 
-        def wrap(convertableOrConverter):
-            if issubclass(converterOrConvertable, Converter):
-                converter: type[Converter] = converterOrConvertable
-                convertable: type[_Convertable] = convertableOrConverter
+        def wrap(convertable_converter, /):
+            if issubclass(converter_convertable, Converter):
+                converter = converter_convertable
+                convertable = convertable_converter
             else:
-                convertable: type[_Convertable] = converterOrConvertable
-                converter: type[Converter] = convertableOrConverter
+                convertable = converter_convertable
+                converter = convertable_converter
 
             inner_tag = f"!{convertable.__name__}" if tag is None else tag
 
@@ -302,7 +307,7 @@ class ConverterRegistry:
                 raise RuntimeError(f"Converter already exists for type `{convertable}`")
 
             self._registry.append((inner_tag, convertable, converter))
-            return convertableOrConverter
+            return convertable_converter
 
         return wrap
 
