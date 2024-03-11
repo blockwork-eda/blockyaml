@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+    - uses: actions/checkout@v4
+    - uses: ./.github/composites/setup
+      with:
+        python-version: 3.11
+    - name: Run Ruff formatting check
+      run: poetry run ruff format --check .
+    - name: Run Ruff linting check
+      run: poetry run ruff check .
+    - name: Run precommit checks
+      env:
+        SKIP: no-commit-to-branch
+      run: poetry run pre-commit run --all-files
+
+  unit_tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # TODO: Run against other versions "3.8", "3.9", "3.10"
+        python-version: ["3.11"]
+
+    steps:
+    - uses: actions/checkout@v4
+    - uses: ./.github/composites/setup
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Run tests
+      timeout-minutes: 5
+      run: poe test
+      env:
+        TMPDIR: ${{ runner.temp }}
+    - name: Archive code coverage results
+      uses: actions/upload-artifact@v3
+      with:
+        name: pytest-cov
+        path: htmlcov
