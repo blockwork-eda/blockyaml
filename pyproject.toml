@@ -1,0 +1,62 @@
+[build-system]
+requires = ["poetry"]
+build-backend = "poetry.masonry.api"
+
+[tool.poetry]
+name = "blockyaml"
+version = "1.0"
+description = "Yaml"
+authors = []
+license = "Apache-2.0"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.9"
+pyyaml = "^6.0"
+typeguard = "^4.1"
+poethepoet = "^0.20.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.3.1"
+pytest-cov = "^4.0.0"
+pytest-mock = "^3.10.0"
+ruff = "^0.2.1"
+pre-commit = "^3.6.0"
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "--no-cov-on-fail --cov=blockyaml --cov-branch --cov-report html --cov-report term -x"
+testpaths = ["tests"]
+
+[tool.poe.tasks.test]
+shell = "poetry run pytest"
+
+[tool.poe.tasks.lint]
+shell = "poetry run ruff format --check . && poetry run ruff check ."
+
+[tool.poe.tasks.fmt]
+shell = "poetry run ruff format . && poetry run ruff check --fix ."
+
+[tool.poe.tasks.docs]
+shell = "poetry run mkdocs build"
+
+[tool.ruff]
+line-length = 100
+indent-width = 4
+
+# Assume Python 3.11
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "B", "UP", "N", "W", "I", "A", "C4", "PTH", "RUF"]
+ignore = []
+fixable = ["ALL"]
+unfixable = []
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+docstring-code-format = true
+docstring-code-line-length = "dynamic"
