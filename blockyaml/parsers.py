@@ -42,9 +42,7 @@ class YAMLParserError(YAMLError):
 class ObjectParser(Generic[_Convertable]):
     """Yaml parser for a specific type, created by ParserFactory"""
 
-    def __init__(
-        self, typ: type[_Convertable], loader: type[Loader], dumper: type[Dumper]
-    ):
+    def __init__(self, typ: type[_Convertable], loader: type[Loader], dumper: type[Dumper]):
         self.typ = typ
         self.loader = loader
         self.dumper = dumper
@@ -65,9 +63,7 @@ class ObjectParser(Generic[_Convertable]):
             parsed: _Convertable = load(path, Loader=self.loader)
 
         if not isinstance(parsed, self.typ):
-            raise YAMLParserError(
-                epath, f"Expected {self.typ} object got {type(parsed).__name__}"
-            )
+            raise YAMLParserError(epath, f"Expected {self.typ} object got {type(parsed).__name__}")
         return parsed
 
     def parse_str(self, data: str) -> _Convertable:
@@ -180,9 +176,7 @@ class Parser:
         converter_convertable: type[_Convertable],
         *,
         tag: str | None = None,
-    ) -> Callable[
-        [type[Converter[_Convertable, Self]]], type[Converter[_Convertable, Self]]
-    ]:
+    ) -> Callable[[type[Converter[_Convertable, Self]]], type[Converter[_Convertable, Self]]]:
         ...
 
     def register(

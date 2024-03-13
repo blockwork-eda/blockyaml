@@ -127,9 +127,7 @@ class Converter(abc.ABC, Generic[_Convertable, _Parser]):
     def construct_scalar(self, loader: Loader, node: ScalarNode) -> _Convertable:
         return self.construct_node(loader, node)
 
-    def construct_collection(
-        self, loader: Loader, node: CollectionNode
-    ) -> _Convertable:
+    def construct_collection(self, loader: Loader, node: CollectionNode) -> _Convertable:
         return self.construct_node(loader, node)
 
     def construct_node(self, loader: Loader, node: Node) -> _Convertable:
@@ -172,9 +170,7 @@ class PrimitiveConverter(Converter[_Convertable, _Parser]):
             context_mark=node.start_mark,
         )
 
-    def represent_node(
-        self, representer: Representer, value: _Convertable
-    ) -> _Convertable:
+    def represent_node(self, representer: Representer, value: _Convertable) -> _Convertable:
         if base_representer := self._base_representers.get(type(value), None):
             return base_representer(representer, value)
         raise YAMLRepresenterError(
@@ -313,17 +309,13 @@ class YAMLDataclassFieldError(YAMLConversionError):
 class YAMLDataclassMissingFieldsError(YAMLConversionError):
     def __init__(self, location: str, fields: Iterable[str]):
         self.fields = fields
-        super().__init__(
-            location, f"Missing field(s) `{', '.join(map(str, self.fields))}`"
-        )
+        super().__init__(location, f"Missing field(s) `{', '.join(map(str, self.fields))}`")
 
 
 class YAMLDataclassExtraFieldsError(YAMLConversionError):
     def __init__(self, location: str, fields: Iterable[str]):
         self.fields = fields
-        super().__init__(
-            location, f"Got extra field(s) `{', '.join(map(str, self.fields))}`"
-        )
+        super().__init__(location, f"Got extra field(s) `{', '.join(map(str, self.fields))}`")
 
 
 class DataclassConverter(Converter["_DataclassT", _Parser]):
