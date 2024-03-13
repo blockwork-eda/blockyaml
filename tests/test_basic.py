@@ -41,34 +41,25 @@ class TestBasic:
         assert parser.parse_str("4.2") == 4.2
         assert parser.parse_str("4.2.1") == "4.2.1"
         assert parser.parse_str("True") is True
-        assert (
-            parser.parse_str(
-                """
+        assert parser.parse_str(
+            """
             k0: 4
             k1: hi
         """
-            )
-            == {"k0": 4, "k1": "hi"}
-        )
-        assert (
-            parser.parse_str(
-                """
+        ) == {"k0": 4, "k1": "hi"}
+        assert parser.parse_str(
+            """
             - 4
             - hi
         """
-            )
-            == [4, "hi"]
-        )
-        assert (
-            parser.parse_str(
-                """
+        ) == [4, "hi"]
+        assert parser.parse_str(
+            """
             - 4
             - x: 0
               y: [1]
         """
-            )
-            == [4, {"x": 0, "y": [1]}]
-        )
+        ) == [4, {"x": 0, "y": [1]}]
 
     def test_primitive_checking(self):
         parser = Parser()
