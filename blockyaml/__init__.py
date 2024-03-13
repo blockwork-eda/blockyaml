@@ -12,28 +12,31 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from . import types
 from .converters import (
     Converter,
     ConverterRegistry,
     DataclassConverter,
-    YamlConstructorError,
-    YamlConversionError,
-    YamlExtraFieldsError,
-    YamlFieldError,
-    YamlMissingFieldsError,
+    YAMLConstructorError,
+    YAMLConversionError,
+    YAMLDataclassExtraFieldsError,
+    YAMLDataclassFieldError,
+    YAMLDataclassMissingFieldsError,
 )
-from .parsers import Parser, SimpleParser
+from .parsers import Parser, SimpleParser, YAMLParserError
 
 assert all(
     (
         Converter,
         ConverterRegistry,
         DataclassConverter,
-        YamlConstructorError,
-        YamlConversionError,
-        YamlFieldError,
-        YamlMissingFieldsError,
-        YamlExtraFieldsError,
+        types,
+        YAMLConstructorError,
+        YAMLConversionError,
+        YAMLParserError,
+        YAMLDataclassFieldError,
+        YAMLDataclassMissingFieldsError,
+        YAMLDataclassExtraFieldsError,
         Parser,
         SimpleParser,
     )

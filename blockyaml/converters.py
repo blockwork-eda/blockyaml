@@ -26,26 +26,31 @@ from typing import (
     overload,
 )
 
-import yaml
-
 if TYPE_CHECKING:
+    from dataclasses import _DataclassT
+
     from .parsers import Parser
+
 try:
     from yaml import CDumper as Dumper
     from yaml import CLoader as Loader
 except ImportError:
     from yaml import Dumper, Loader
 
+from .types import (
+    CollectionNode,
+    MappingNode,
+    Node,
+    Representer,
+    ScalarNode,
+    SequenceNode,
+    YAMLConstructorError,
+    YAMLError,
+    YAMLRepresenterError,
+)
 
-class YamlConstructorError(yaml.constructor.ConstructorError):
-    "Error constructing a YAML tag"
 
-
-class YamlRepresenterError(yaml.representer.RepresenterError):
-    "Error representing a python type"
-
-
-class YamlConversionError(yaml.YAMLError):
+class YAMLConversionError(YAMLError):
     "Error parsing yaml"
 
     def __init__(self, location: Path | str, msg: str):
@@ -54,28 +59,6 @@ class YamlConversionError(yaml.YAMLError):
 
     def __str__(self):
         return f"{self.location}: {self.msg}"
-
-
-class YamlFieldError(YamlConversionError):
-    "Error parsing yaml field"
-
-    def __init__(self, location: str, ex: Exception, field: str | None = None):
-        self.field = field
-        self.orig_ex = ex
-        field_str = "" if self.field is None else f" at field `{self.field}`"
-        super().__init__(f"{location}{field_str}", str(ex))
-
-
-class YamlMissingFieldsError(YamlConversionError):
-    def __init__(self, location: str, fields: Iterable[str]):
-        self.fields = fields
-        super().__init__(location, f"Missing field(s) `{', '.join(map(str, self.fields))}`")
-
-
-class YamlExtraFieldsError(YamlConversionError):
-    def __init__(self, location: str, fields: Iterable[str]):
-        self.fields = fields
-        super().__init__(location, f"Got extra field(s) `{', '.join(map(str, self.fields))}`")
 
 
 _Convertable = TypeVar("_Convertable")
@@ -111,75 +94,77 @@ class Converter(abc.ABC, Generic[_Convertable, _Parser]):
         self.tag = tag
         self.typ = typ
 
-    def bind_loader(self, loader: Loader):
+    def bind_loader(self, loader: type[Loader]):
         self._base_constructor = loader.yaml_constructors.get(self.tag, None)
         loader.yaml_constructors[self.tag] = self.construct
 
-    def bind_dumper(self, dumper: Dumper):
+    def bind_dumper(self, dumper: type[Dumper]):
         self._base_representer = dumper.yaml_representers.get(self.typ, None)
         dumper.yaml_representers[self.typ] = self.represent
 
-    def construct(self, loader: Loader, node: yaml.Node):
+    def construct(self, loader: Loader, node: Node):
         match node:
-            case yaml.nodes.MappingNode():
+            case MappingNode():
                 return self.construct_mapping(loader, node)
-            case yaml.nodes.SequenceNode():
+            case SequenceNode():
                 return self.construct_sequence(loader, node)
-            case yaml.nodes.ScalarNode():
+            case ScalarNode():
                 return self.construct_scalar(loader, node)
-            case yaml.nodes.CollectionNode():
+            case CollectionNode():
                 return self.construct_collection(loader, node)
             case _:
                 return self.construct_node(loader, node)
 
-    def represent(self, dumper: Dumper, value: _Convertable):
-        return self.represent_node(dumper, value)
+    def represent(self, representer: Representer, value: _Convertable):
+        return self.represent_node(representer, value)
 
-    def construct_mapping(self, loader: Loader, node: yaml.MappingNode) -> _Convertable:
+    def construct_mapping(self, loader: Loader, node: MappingNode) -> _Convertable:
         return self.construct_node(loader, node)
 
-    def construct_sequence(self, loader: Loader, node: yaml.SequenceNode) -> _Convertable:
+    def construct_sequence(self, loader: Loader, node: SequenceNode) -> _Convertable:
         return self.construct_node(loader, node)
 
-    def construct_scalar(self, loader: Loader, node: yaml.ScalarNode) -> _Convertable:
+    def construct_scalar(self, loader: Loader, node: ScalarNode) -> _Convertable:
         return self.construct_node(loader, node)
 
-    def construct_collection(self, loader: Loader, node: yaml.CollectionNode) -> _Convertable:
+    def construct_collection(
+        self, loader: Loader, node: CollectionNode
+    ) -> _Convertable:
         return self.construct_node(loader, node)
 
-    def construct_node(self, loader: Loader, node: yaml.Node) -> _Convertable:
+    def construct_node(self, loader: Loader, node: Node) -> _Convertable:
         if self._base_constructor:
             return self._base_constructor(loader, node)
         raise NotImplementedError
 
-    def represent_node(self, dumper: Dumper, value: _Convertable) -> yaml.Node:
+    def represent_node(self, representer: Representer, value: _Convertable) -> Node:
         if self._base_representer:
-            return self._base_representer(dumper, value)
+            return self._base_representer(representer, value)
         raise NotImplementedError
 
 
-class PrimitiveConverter(Converter):
+class PrimitiveConverter(Converter[_Convertable, _Parser]):
     """
     Converter for primitive objects, allows for sanity checks to be
     imposed on the data beyond standard YAML syntax.
     """
 
-    def bind_loader(self, loader: Loader):
+    def bind_loader(self, loader: type[Loader]):
         self._base_constructors: dict[str, Callable] = {}
         for tag, constructor in loader.yaml_constructors.items():
             self._base_constructors[tag] = constructor
             loader.yaml_constructors[tag] = self.construct
 
-    def bind_dumper(self, dumper: Dumper):
+    def bind_dumper(self, dumper: type[Dumper]):
         self._base_representers: dict[type, Callable] = {}
         for typ, representer in dumper.yaml_representers.items():
             self._base_representers[typ] = representer
             dumper.yaml_representers[typ] = self.represent
 
-    def construct_node(self, loader: Loader, node: yaml.Node) -> _Convertable:
+    def construct_node(self, loader: Loader, node: Node) -> _Convertable:
         if constructor := self._base_constructors.get(node.tag, None):
             return constructor(loader, node)
-        raise YamlConstructorError(
+        raise YAMLConstructorError(
             f"Got tag `{node.tag}` with no registered"
             " converter. If it is meant to be a string"
             " it requires quotes, otherwise a"
@@ -187,10 +172,12 @@ class PrimitiveConverter(Converter):
             context_mark=node.start_mark,
         )
 
-    def represent_node(self, loader: Loader, value: _Convertable) -> _Convertable:
-        if representer := self._base_representers.get(type(value), None):
-            return representer(loader, value)
-        raise YamlRepresenterError(
+    def represent_node(
+        self, representer: Representer, value: _Convertable
+    ) -> _Convertable:
+        if base_representer := self._base_representers.get(type(value), None):
+            return base_representer(representer, value)
+        raise YAMLRepresenterError(
             f"Got type `{type(value)}` without a"
             " registered converter. A converter will"
             " need to be registered."
@@ -198,7 +185,7 @@ class PrimitiveConverter(Converter):
 
 
 @dataclass(kw_only=True)
-class SensiblePrimitives(PrimitiveConverter):
+class SensiblePrimitives(PrimitiveConverter[_Convertable, _Parser]):
     """
     Converter for primitive objects with sensible checking by default.
     """
@@ -210,24 +197,24 @@ class SensiblePrimitives(PrimitiveConverter):
     strict_numbers: bool = True
     "Disallow sexagesimal number (e.g. 42:45)"
 
-    def construct_mapping(self, loader: Loader, node: yaml.MappingNode) -> _Convertable:
+    def construct_mapping(self, loader: Loader, node: MappingNode) -> _Convertable:
         if self.strict_keys:
             seen = []
             for key, _ in node.value:
                 key = self.construct_node(loader, key)
                 if key in seen:
-                    raise YamlConstructorError(
+                    raise YAMLConstructorError(
                         f"Duplicate key '{key}' detected in mapping",
                         context_mark=node.start_mark,
                     )
                 seen.append(key)
         return super().construct_mapping(loader, node)
 
-    def construct_scalar(self, loader: Loader, node: yaml.ScalarNode) -> Any:
+    def construct_scalar(self, loader: Loader, node: ScalarNode) -> Any:
         value = super().construct_scalar(loader, node)
         if self.strict_bools:
             if isinstance(value, bool) and node.value.lower() not in ("true", "false"):
-                raise YamlConstructorError(
+                raise YAMLConstructorError(
                     f"Unsafe bool '{node.value}' detected. Use `true` or"
                     " `false` for bools, or quote if it is intended to be"
                     " a string.",
@@ -235,7 +222,7 @@ class SensiblePrimitives(PrimitiveConverter):
                 )
         if self.strict_numbers:
             if isinstance(value, int | float) and ":" in node.value:
-                raise YamlConstructorError(
+                raise YAMLConstructorError(
                     f"Unsafe number '{node.value}' detected. This is"
                     " probably meant to be a string, please quote it.",
                     context_mark=node.start_mark,
@@ -274,7 +261,8 @@ class ConverterRegistry:
         *,
         tag: str | None = None,
     ) -> Callable[
-        [type[Converter[_Convertable, "Parser"]]], type[Converter[_Convertable, "Parser"]]
+        [type[Converter[_Convertable, "Parser"]]],
+        type[Converter[_Convertable, "Parser"]],
     ]:
         ...
 
@@ -312,8 +300,34 @@ class ConverterRegistry:
         return wrap
 
 
-class DataclassConverter(Converter[_Convertable, _Parser]):
-    def construct_mapping(self, loader: Loader, node: yaml.MappingNode) -> _Convertable:
+class YAMLDataclassFieldError(YAMLConversionError):
+    "Error parsing YAML Dataclass field"
+
+    def __init__(self, location: str, ex: Exception, field: str | None = None):
+        self.field = field
+        self.orig_ex = ex
+        field_str = "" if self.field is None else f" at field `{self.field}`"
+        super().__init__(f"{location}{field_str}", str(ex))
+
+
+class YAMLDataclassMissingFieldsError(YAMLConversionError):
+    def __init__(self, location: str, fields: Iterable[str]):
+        self.fields = fields
+        super().__init__(
+            location, f"Missing field(s) `{', '.join(map(str, self.fields))}`"
+        )
+
+
+class YAMLDataclassExtraFieldsError(YAMLConversionError):
+    def __init__(self, location: str, fields: Iterable[str]):
+        self.fields = fields
+        super().__init__(
+            location, f"Got extra field(s) `{', '.join(map(str, self.fields))}`"
+        )
+
+
+class DataclassConverter(Converter["_DataclassT", _Parser]):
+    def construct_mapping(self, loader: Loader, node: MappingNode) -> "_DataclassT":
         loc = ":".join(
             map(
                 str,
@@ -338,12 +352,12 @@ class DataclassConverter(Converter[_Convertable, _Parser]):
 
         # Check there are no extra fields provided
         if extra := set(node_dict.keys()) - set(keys):
-            raise YamlExtraFieldsError(loc, extra)
+            raise YAMLDataclassExtraFieldsError(loc, extra)
 
         # Check there are no missing fields
         missing = set(required_keys) - set(node_dict.keys())
         if missing:
-            raise YamlMissingFieldsError(loc, missing)
+            raise YAMLDataclassMissingFieldsError(loc, missing)
 
         try:
             # Create the dataclass instance
@@ -352,9 +366,9 @@ class DataclassConverter(Converter[_Convertable, _Parser]):
             # Note, might be nice to add some heuristics to get the location
             # based on the field error
             sys.tracebacklimit = 0
-            raise YamlFieldError(loc, ex, getattr(ex, "field", None)) from None
+            raise YAMLDataclassFieldError(loc, ex, getattr(ex, "field", None)) from None
 
         return instance
 
-    def represent_node(self, dumper: Dumper, value: _Convertable) -> yaml.Node:
-        return dumper.represent_mapping(self.tag, value.__dict__)
+    def represent_node(self, representer: Representer, value: "_DataclassT") -> Node:
+        return representer.represent_mapping(self.tag, value.__dict__)

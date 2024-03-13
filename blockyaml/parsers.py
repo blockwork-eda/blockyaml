@@ -16,28 +16,35 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Generic, Self, TextIO, overload
 
-import yaml
+from yaml import dump, load
 
 from .converters import (
     Converter,
     ConverterRegistry,
     PrimitiveConverter,
     SensiblePrimitives,
-    YamlConversionError,
     _Convertable,
 )
+from .types import Dumper, Loader, YAMLError
 
-try:
-    from yaml import CDumper as Dumper
-    from yaml import CLoader as Loader
-except ImportError:
-    from yaml import Dumper, Loader
+
+class YAMLParserError(YAMLError):
+    "Error parsing yaml"
+
+    def __init__(self, location: Path | str, msg: str):
+        self.location = location
+        self.msg = msg
+
+    def __str__(self):
+        return f"{self.location}: {self.msg}"
 
 
 class ObjectParser(Generic[_Convertable]):
     """Yaml parser for a specific type, created by ParserFactory"""
 
-    def __init__(self, typ: type[_Convertable], loader: type[Loader], dumper: type[Dumper]):
+    def __init__(
+        self, typ: type[_Convertable], loader: type[Loader], dumper: type[Dumper]
+    ):
         self.typ = typ
         self.loader = loader
         self.dumper = dumper
@@ -50,14 +57,16 @@ class ObjectParser(Generic[_Convertable]):
         :returns:    Parsed object
         """
         if isinstance(path, Path):
+            epath = path
             with path.open("r", encoding="utf-8") as fh:
-                parsed: _Convertable = yaml.load(fh, Loader=self.loader)
+                parsed: _Convertable = load(fh, Loader=self.loader)
         else:
-            parsed: _Convertable = yaml.load(path, Loader=self.loader)
+            epath = "<File Object>"
+            parsed: _Convertable = load(path, Loader=self.loader)
 
         if not isinstance(parsed, self.typ):
-            raise YamlConversionError(
-                path, f"Expected {self.typ} object got {type(parsed).__name__}"
+            raise YAMLParserError(
+                epath, f"Expected {self.typ} object got {type(parsed).__name__}"
             )
         return parsed
 
@@ -68,9 +77,9 @@ class ObjectParser(Generic[_Convertable]):
         :param data: YAML string
         :returns:    Parsed object
         """
-        parsed: _Convertable = yaml.load(data, Loader=self.loader)
+        parsed: _Convertable = load(data, Loader=self.loader)
         if not isinstance(parsed, self.typ):
-            raise YamlConversionError(
+            raise YAMLParserError(
                 "<unicode string>",
                 f"Expected {self.typ} object got {type(parsed).__name__}",
             )
@@ -86,9 +95,9 @@ class ObjectParser(Generic[_Convertable]):
         """
         if isinstance(path, Path):
             with path.open("w", encoding="utf-8") as fh:
-                yaml.dump(obj, fh, Dumper=self.dumper)
+                dump(obj, fh, Dumper=self.dumper)
         else:
-            yaml.dump(path, fh, Dumper=self.dumper)
+            dump(obj, path, Dumper=self.dumper)
 
     def dump_str(self, obj: Any) -> str:
         """
@@ -97,7 +106,7 @@ class ObjectParser(Generic[_Convertable]):
         :param obj: The object to dump
         :returns:      The rendered YAML string
         """
-        return yaml.dump(obj, Dumper=self.dumper)
+        return dump(obj, Dumper=self.dumper)
 
 
 class Parser:
@@ -171,7 +180,9 @@ class Parser:
         converter_convertable: type[_Convertable],
         *,
         tag: str | None = None,
-    ) -> Callable[[type[Converter[_Convertable, Self]]], type[Converter[_Convertable, Self]]]:
+    ) -> Callable[
+        [type[Converter[_Convertable, Self]]], type[Converter[_Convertable, Self]]
+    ]:
         ...
 
     def register(
