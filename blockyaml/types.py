@@ -1,8 +1,9 @@
 try:
-    from yaml import CDumper as Dumper
-    from yaml import CLoader as Loader
+    from yaml import CSafeDumper as Dumper
+    from yaml import CSafeLoader as Loader
 except ImportError:
-    from yaml import Dumper, Loader
+    from yaml import SafeDumper as Dumper
+    from yaml import SafeLoader as Loader
 
 from yaml import CollectionNode, MappingNode, Node, ScalarNode, SequenceNode, YAMLError
 from yaml.constructor import ConstructorError as YAMLConstructorError
