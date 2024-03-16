@@ -141,10 +141,10 @@ class Converter(abc.ABC, Generic[_Convertable, _Parser]):
         raise NotImplementedError
 
 
-class PrimitiveConverter(Converter[_Convertable, _Parser]):
+class ImplicitConverter(Converter[_Convertable, _Parser]):
     """
-    Converter for primitive objects, allows for sanity checks to be
-    imposed on the data beyond standard YAML syntax.
+    Converter for values which are implicitly converted, allows for sanity
+    checks to be imposed on the data beyond standard YAML syntax.
     """
 
     def bind_loader(self, loader: type[Loader]):
@@ -181,9 +181,10 @@ class PrimitiveConverter(Converter[_Convertable, _Parser]):
 
 
 @dataclass(kw_only=True)
-class SensiblePrimitives(PrimitiveConverter[_Convertable, _Parser]):
+class StrictImplicitConverter(ImplicitConverter[_Convertable, _Parser]):
     """
-    Converter for primitive objects with sensible checking by default.
+    Converter for values which are implicitly converted, with stricter checking
+    by default.
     """
 
     strict_keys: bool = True
@@ -232,8 +233,8 @@ class ConverterRegistry:
     can be used to initialise a Parser object.
     """
 
-    def __init__(self, primitive_converter: PrimitiveConverter | None = None):
-        self._primitive_converter = primitive_converter
+    def __init__(self, implicit_converter: ImplicitConverter | None = None):
+        self._implicit_converter = implicit_converter
         self._registered_tags: set[str] = set()
         self._registered_typs: set[Any] = set()
         self._registry: list[tuple[str, Any, type[Converter]]] = []

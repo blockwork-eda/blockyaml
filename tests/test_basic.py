@@ -61,7 +61,7 @@ class TestBasic:
         """
         ) == [4, {"x": 0, "y": [1]}]
 
-    def test_primitive_checking(self):
+    def test_strict_implicit_converter(self):
         parser = Parser()
 
         with pytest.raises(YAMLConstructorError):

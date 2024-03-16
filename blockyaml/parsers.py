@@ -21,8 +21,8 @@ from yaml import dump, load
 from .converters import (
     Converter,
     ConverterRegistry,
-    PrimitiveConverter,
-    SensiblePrimitives,
+    ImplicitConverter,
+    StrictImplicitConverter,
     _Convertable,
 )
 from .types import Dumper, Loader, YAMLError
@@ -131,7 +131,7 @@ class Parser:
     def __init__(
         self,
         registry: ConverterRegistry | None = None,
-        primitive_converter: PrimitiveConverter | None = None,
+        implicit_converter: ImplicitConverter | None = None,
     ):
         class _Loader(Loader):
             ...
@@ -143,19 +143,19 @@ class Parser:
         self.dumper = _Dumper
 
         # Bind a primitive converter
-        reg_primitive_converter = registry and registry._primitive_converter
-        if primitive_converter and reg_primitive_converter:
+        reg_implicit_converter = registry and registry._implicit_converter
+        if implicit_converter and reg_implicit_converter:
             raise ValueError(
                 "Both registry and parser specify"
                 " primitive converter, but only one can"
                 " be specified!"
             )
-        primitive_converter = primitive_converter or reg_primitive_converter
-        if primitive_converter is None:
-            primitive_converter = SensiblePrimitives()
+        implicit_converter = implicit_converter or reg_implicit_converter
+        if implicit_converter is None:
+            implicit_converter = StrictImplicitConverter()
 
-        primitive_converter.bind_loader(self.loader)
-        primitive_converter.bind_dumper(self.dumper)
+        implicit_converter.bind_loader(self.loader)
+        implicit_converter.bind_dumper(self.dumper)
 
         if registry is not None:
             for tag, typ, converter in registry:
