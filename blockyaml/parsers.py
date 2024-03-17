@@ -54,16 +54,13 @@ class ObjectParser(Generic[_Convertable]):
         :param path: Where to read the yaml from
         :returns:    Parsed object
         """
-        if isinstance(path, Path):
-            epath = path
-            with path.open("r", encoding="utf-8") as fh:
-                parsed: _Convertable = load(fh, Loader=self.loader)
-        else:
-            epath = "<File Object>"
-            parsed: _Convertable = load(path, Loader=self.loader)
+        with self.loader.expected_type(self.typ):
+            if isinstance(path, Path):
+                with path.open("r", encoding="utf-8") as fh:
+                    parsed: _Convertable = load(fh, Loader=self.loader)
+            else:
+                parsed: _Convertable = load(path, Loader=self.loader)
 
-        if not isinstance(parsed, self.typ):
-            raise YAMLParserError(epath, f"Expected {self.typ} object got {type(parsed).__name__}")
         return parsed
 
     def parse_str(self, data: str) -> _Convertable:
@@ -73,12 +70,8 @@ class ObjectParser(Generic[_Convertable]):
         :param data: YAML string
         :returns:    Parsed object
         """
-        parsed: _Convertable = load(data, Loader=self.loader)
-        if not isinstance(parsed, self.typ):
-            raise YAMLParserError(
-                "<unicode string>",
-                f"Expected {self.typ} object got {type(parsed).__name__}",
-            )
+        with self.loader.expected_type(self.typ):
+            parsed: _Convertable = load(data, Loader=self.loader)
         return parsed
 
     def dump(self, obj: Any, path: Path | TextIO) -> None:
@@ -158,8 +151,8 @@ class Parser:
         implicit_converter.bind_dumper(self.dumper)
 
         if registry is not None:
-            for tag, typ, converter in registry:
-                self.register(converter, tag=tag)(typ)
+            for tag, typ, converter, infer in registry:
+                self.register(converter, tag=tag, infer=infer)(typ)
 
     @overload
     def register(
@@ -167,6 +160,7 @@ class Parser:
         converter_convertable: type[Converter[_Convertable, Self]],
         *,
         tag: str | None = None,
+        infer: bool = False,
     ) -> Callable[[type[_Convertable]], type[_Convertable]]:
         ...
 
@@ -176,15 +170,11 @@ class Parser:
         converter_convertable: type[_Convertable],
         *,
         tag: str | None = None,
+        infer: bool = False,
     ) -> Callable[[type[Converter[_Convertable, Self]]], type[Converter[_Convertable, Self]]]:
         ...
 
-    def register(
-        self,
-        converter_convertable,
-        *,
-        tag: str | None = None,
-    ):
+    def register(self, converter_convertable, *, tag: str | None = None, infer: bool = False):
         """
         Register a object for parsing with this parser object.
 
@@ -199,7 +189,7 @@ class Parser:
                 convertable = converter_convertable
                 converter = convertable_converter
             inner_tag = f"!{convertable.__name__}" if tag is None else tag
-            converter_inst = converter(tag=inner_tag, typ=convertable)
+            converter_inst = converter(tag=inner_tag, typ=convertable, infer=infer)
             converter_inst.bind_loader(self.loader)
             converter_inst.bind_dumper(self.dumper)
             return convertable_converter
@@ -222,7 +212,7 @@ class Parser:
         :param path: Path to the YAML file to parse
         :returns:    Parsed dataclass object
         """
-        return self(object).parse(path)
+        return self(None).parse(path)
 
     def parse_str(self, data: str) -> Any:
         """
@@ -231,7 +221,7 @@ class Parser:
         :param data: YAML string
         :returns:    Parsed dataclass object
         """
-        return self(object).parse_str(data)
+        return self(None).parse_str(data)
 
     def dump(self, obj: Any, path: Path | TextIO) -> None:
         """

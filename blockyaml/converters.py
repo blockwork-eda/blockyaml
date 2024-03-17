@@ -22,7 +22,7 @@ from typing import (
     Any,
     Generic,
     TypeVar,
-    cast,
+    get_type_hints,
     overload,
 )
 
@@ -33,11 +33,9 @@ if TYPE_CHECKING:
 
 try:
     from yaml import CDumper as Dumper
-    from yaml import CSafeLoader as Loader
 except ImportError:
     from yaml import SafeDumper as Dumper
-    from yaml import SafeLoader as Loader
-
+from .loader import Loader
 from .types import (
     CollectionNode,
     MappingNode,
@@ -91,13 +89,16 @@ class Converter(abc.ABC, Generic[_Convertable, _Parser]):
         print(wrap_parser.parse_str("data: !Wrap yum"))
     """
 
-    def __init__(self, *, tag: str, typ: type[_Convertable]):
+    def __init__(self, *, tag: str, typ: type[_Convertable], infer: bool):
         self.tag = tag
         self.typ = typ
+        self.infer = infer
 
     def bind_loader(self, loader: type[Loader]):
         self._base_constructor = loader.yaml_constructors.get(self.tag, None)
         loader.yaml_constructors[self.tag] = self.construct
+        if self.infer:
+            loader.yaml_type_constructors[self.typ] = self.construct
 
     def bind_dumper(self, dumper: type[Dumper]):
         self._base_representer = dumper.yaml_representers.get(self.typ, None)
@@ -244,7 +245,7 @@ class ConverterRegistry:
         self._implicit_converter = implicit_converter
         self._registered_tags: set[str] = set()
         self._registered_typs: set[Any] = set()
-        self._registry: list[tuple[str, Any, type[Converter]]] = []
+        self._registry: list[tuple[str, Any, type[Converter], bool]] = []
 
     def __iter__(self):
         yield from self._registry
@@ -255,6 +256,7 @@ class ConverterRegistry:
         converter_convertable: type[Converter[_Convertable, "Parser"]],
         *,
         tag: str | None = None,
+        infer: bool = False,
     ) -> Callable[[type[_Convertable]], type[_Convertable]]:
         ...
 
@@ -264,18 +266,14 @@ class ConverterRegistry:
         converter_convertable: type[_Convertable],
         *,
         tag: str | None = None,
+        infer: bool = False,
     ) -> Callable[
         [type[Converter[_Convertable, "Parser"]]],
         type[Converter[_Convertable, "Parser"]],
     ]:
         ...
 
-    def register(
-        self,
-        converter_convertable,
-        *,
-        tag: str | None = None,
-    ):
+    def register(self, converter_convertable, *, tag: str | None = None, infer: bool = False):
         """
         Register a object for parsing with this parser object.
 
@@ -298,7 +296,7 @@ class ConverterRegistry:
             if convertable in self._registered_typs:
                 raise RuntimeError(f"Converter already exists for type `{convertable}`")
 
-            self._registry.append((inner_tag, convertable, converter))
+            self._registry.append((inner_tag, convertable, converter, infer))
             return convertable_converter
 
         return wrap
@@ -338,17 +336,34 @@ class DataclassConverter(Converter["_DataclassT", _Parser]):
                 ),
             )
         )
-        node_dict = cast(dict[str, Any], loader.construct_mapping(node, deep=True))
 
         # Get some info from the fields
         required_keys = set()
         keys = set()
+        key_types: dict[str, Any] = {}
+        requires_resolving = False
         for field in fields(self.typ):
             keys.add(field.name)
             if isinstance(field.default, _MISSING_TYPE) and isinstance(
                 field.default_factory, _MISSING_TYPE
             ):
                 required_keys.add(field.name)
+            key_types[field.name] = field.type
+            if isinstance(field.type, str):
+                requires_resolving = True
+
+        # Resolve any string fields
+        if requires_resolving:
+            dc_frame = getattr(self.typ, "__dataclass_frame__", None)
+            dc_locals = None if dc_frame is None else dc_frame.f_locals
+            try:
+                resolved_types = get_type_hints(self.typ, localns=dc_locals)
+            except NameError as e:
+                raise YAMLConstructorError(f"{e.name}", context_mark=node.start_mark) from e
+            for field in fields(self.typ):
+                field.type = key_types[field.name] = resolved_types[field.name]
+
+        node_dict = loader.construct_fixed_mapping(node, key_types, True)
 
         # Check there are no extra fields provided
         if extra := set(node_dict.keys()) - set(keys):
@@ -372,3 +387,16 @@ class DataclassConverter(Converter["_DataclassT", _Parser]):
 
     def represent_node(self, representer: Representer, value: "_DataclassT") -> Node:
         return representer.represent_mapping(self.tag, value.__dict__)
+
+
+def dataclass_post_resolve(dc: "_DataclassT") -> "_DataclassT":
+    if hasattr(dc, "__dataclass_frame__"):
+        return dc
+    import inspect
+
+    frame = inspect.currentframe()
+    try:
+        dc.__dataclass_frame__ = frame.f_back
+    finally:
+        del frame
+    return dc
