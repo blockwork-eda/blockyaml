@@ -22,8 +22,24 @@ from blockyaml import (
     Converter,
     DataclassConverter,
     Parser,
-    YAMLConstructorError,
-    YAMLRepresenterError,
+)
+from blockyaml.exceptions import (
+    YAMLConstructorInvalidTypeError,
+    YAMLConstructorMissingError,
+    YAMLConstructorMultipleImplicitError,
+    YAMLConstructorNotImplementedError,
+    YAMLRegistrationTypeError,
+    YAMLRepresenterMissingError,
+    YAMLRepresenterNotImplementedError,
+    YAMLStrictBoolError,
+    YAMLStrictKeyError,
+    YAMLStrictNumberError,
+)
+from blockyaml.loader import (
+    decompose_dict_type,
+    decompose_list_type,
+    decompose_scalar_type,
+    flatten_type,
 )
 
 
@@ -95,17 +111,91 @@ class TestBasic:
         assert rect.x == 2 and rect.y == 4
         assert parser.dump_str(rect) == fixup(rectyaml)
 
+    def test_decomposition(self):
+        # Check flattening unions works
+        assert flatten_type(str) == (str,)
+        assert flatten_type(str | int) == (
+            str,
+            int,
+        )
+
+        # Check decomposing scalar types works and...
+        assert decompose_scalar_type(str) == (str,)
+        assert decompose_scalar_type(str | int) == (
+            str,
+            int,
+        )
+
+        # Check decomposing list types works
+        assert decompose_list_type(list) == ((list,), None)
+        assert decompose_list_type(list[str]) == ((list,), str)
+        assert decompose_list_type(list[str | int]) == ((list,), str | int)
+        assert decompose_list_type(list[str] | list[int | float]) == ((list,), str | float | int)
+
+        # Check decomposing dict types works
+        assert decompose_dict_type(dict) == ((dict,), None, None)
+        assert decompose_dict_type(dict[str, int]) == ((dict,), str, int)
+        assert decompose_dict_type(dict[str | int, int]) == ((dict,), str | int, int)
+        assert decompose_dict_type(dict[str | int, int | float]) == (
+            (dict,),
+            str | int,
+            int | float,
+        )
+        assert decompose_dict_type(dict[str, int] | dict[float, str]) == (
+            (dict,),
+            float | str,
+            str | int,
+        )
+
     def test_inferance(self):
+        "Test use of the infer option to parse using declared type"
         parser = Parser()
 
-        # Test a simple string converter
         @parser.register(Path, tag="!Path", infer=True)
         class PathConverter(Converter):
             def construct_scalar(self, loader, node):
                 return Path(node.value)
 
-        assert isinstance(parser(Path).parse_str("/my/file/path"), Path)
+        @parser.register(bytes, tag="!Bytes", infer=True)
+        class BytesConverter(Converter):
+            def construct_scalar(self, loader, node):
+                return node.value.encode()
 
+        # Check explicit None tag means converter can only be inferred
+        class Dog:
+            ...
+
+        @parser.register(Dog, tag=None, infer=True)
+        class DogConverter(Converter):
+            def construct_scalar(self, loader, node):
+                return Dog()
+
+        with pytest.raises(YAMLConstructorMissingError):
+            parser.parse_str("!Dog x")
+        with pytest.raises(YAMLConstructorMissingError):
+            parser(Dog).parse_str("!Dog x")
+        assert isinstance(parser(Dog).parse_str("x"), Dog)
+
+        # Check infer false means converter can't be inferred
+        class Cat:
+            ...
+
+        @parser.register(Cat, infer=False)
+        class CatConverter(Converter):
+            def construct_scalar(self, loader, node):
+                return Cat()
+
+        with pytest.raises(YAMLConstructorInvalidTypeError):
+            parser(Cat).parse_str("x")
+        assert isinstance(parser.parse_str("!Cat x"), Cat)
+        assert isinstance(parser(Cat).parse_str("!Cat x"), Cat)
+
+        # Check that when typed parser is called, it correctly calls the
+        # converter.
+        assert isinstance(parser(Path).parse_str("/my/file/path"), Path)
+        assert isinstance(parser(bytes).parse_str("/my/file/path"), bytes)
+
+        # Check that when using a nested type, the converter is still used
         assert parser(dict[str, Path]).parse_str(
             """
         k1: /hello/
@@ -113,14 +203,38 @@ class TestBasic:
         """
         ) == {"k1": Path("/hello/"), "k2": Path("/world.lib")}
 
-        assert parser(dict[str, Path | list[Path]]).parse_str(
-            """
-        k1: /hello/
-        k2:
-            - ./world
-            - ./goodbye.txt
-        """
-        ) == {"k1": Path("/hello/"), "k2": [Path("./world"), Path("./goodbye.txt")]}
+        # Check that we can descriminate unions based on structural types
+        assert parser(Path | list[Path]).parse_str("/a/b") == Path("/a/b")
+        assert parser(Path | list[Path]).parse_str("[/a/b,/c/d]") == [Path("/a/b"), Path("/c/d")]
+        assert parser(dict[str, Path] | list[Path]).parse_str("{x/y: /a/b}") == {
+            "x/y": Path("/a/b")
+        }
+        assert parser(dict[str, Path] | list[Path]).parse_str("[/a/b,/c/d]") == [
+            Path("/a/b"),
+            Path("/c/d"),
+        ]
+
+        # Check that we discriminate unions when a union type matches without
+        # conversion
+        assert parser(Path | None).parse_str("null") is None
+        assert parser(Path | None).parse_str("/a/b") == Path("/a/b")
+        assert parser(Path | str).parse_str("/my/not/path/") == "/my/not/path/"
+
+        # Check that we can't discriminate unions when two types could be valid
+        with pytest.raises(YAMLConstructorMultipleImplicitError):
+            parser(Path | bytes).parse_str("/my/not/path/")
+
+        # But check that we can if it's explicitely specified
+        assert parser(Path | bytes).parse_str("!Path /my/path/") == Path("/my/path/")
+        assert parser(Path | bytes).parse_str("!Bytes /my/bytes/") == b"/my/bytes/"
+
+        # Check parameterised generics can't be used for conversion
+        with pytest.raises(YAMLRegistrationTypeError):
+
+            @parser.register(list[str], infer=True)
+            class ListStrConverter(Converter):
+                def construct_scalar(self, loader, node):
+                    return [str(node.value)]
 
     def test_errors(self):
         parser = Parser()
@@ -133,26 +247,26 @@ class TestBasic:
         class ConvertRegistered(Converter):
             ...
 
-        with pytest.raises(YAMLConstructorError):
+        with pytest.raises(YAMLConstructorNotImplementedError):
             parser.parse_str("!Registered")
 
-        with pytest.raises(YAMLRepresenterError):
+        with pytest.raises(YAMLRepresenterNotImplementedError):
             parser.dump_str(Registered())
 
         # Test implicit fall throughs
         class Unregistered:
             ...
 
-        with pytest.raises(YAMLConstructorError):
+        with pytest.raises(YAMLConstructorMissingError):
             parser.parse_str("!Unregistered")
 
-        with pytest.raises(YAMLRepresenterError):
+        with pytest.raises(YAMLRepresenterMissingError):
             parser.dump_str(Unregistered())
 
     def test_strict_implicit_converter(self):
         parser = Parser()
 
-        with pytest.raises(YAMLConstructorError):
+        with pytest.raises(YAMLStrictKeyError):
             parser.parse_str(
                 """
                 k0: 4
@@ -161,13 +275,13 @@ class TestBasic:
             """
             )
 
-        with pytest.raises(YAMLConstructorError):
+        with pytest.raises(YAMLStrictBoolError):
             parser.parse_str("no")
 
-        with pytest.raises(YAMLConstructorError):
+        with pytest.raises(YAMLStrictNumberError):
             parser.parse_str("22:22")
 
-        with pytest.raises(YAMLConstructorError):
+        with pytest.raises(YAMLConstructorMissingError):
             parser.parse_str("!.html")
 
     def test_dataclass_converter(self):

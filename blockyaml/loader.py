@@ -5,28 +5,43 @@ except ImportError:
 
 from contextlib import contextmanager
 from types import UnionType
-from typing import TYPE_CHECKING, Any, ClassVar, get_args, get_origin
+from typing import TYPE_CHECKING, Any, ClassVar, Union, get_args, get_origin
+
+from blockyaml.exceptions import (
+    YAMLConstructorInvalidTypeError,
+    YAMLConstructorMultipleImplicitError,
+)
 
 if TYPE_CHECKING:
     from .types import CollectionNode, MappingNode, Node, ScalarNode, SequenceNode
+
+
+def flatten_type(typ) -> tuple[type]:
+    if isinstance(typ, tuple):
+        return typ
+    if isinstance(typ, UnionType):
+        return get_args(typ)
+    return (typ,)
 
 
 def decompose_list_type(typ) -> tuple[tuple[type] | None, tuple[type] | None]:
     if typ is list:
         return (list,), None
     elif get_origin(typ) is list:
-        return (list,), get_args(typ)
+        val_typs, *_ = get_args(typ)
+        return (list,), Union[val_typs]  # noqa UP007
     elif isinstance(typ, UnionType):
         union_types = ()
-        for member_typ in get_args(typ):
-            if member_typ is list:
+        for mem_typ in get_args(typ):
+            if mem_typ is list:
                 return (list,), None
-            elif get_origin(member_typ) is list:
-                union_types += get_args(member_typ)
+            elif get_origin(mem_typ) is list:
+                mem_val_typs, *_ = get_args(mem_typ)
+                union_types += flatten_type(mem_val_typs)
             else:
                 continue
         if union_types:
-            return (list,), union_types
+            return (list,), Union[union_types]  # noqa UP007
     return (typ,), None
 
 
@@ -34,7 +49,8 @@ def decompose_dict_type(typ) -> tuple[tuple[type] | None, tuple[type] | None, tu
     if typ is dict:
         return (dict,), None, None
     elif get_origin(typ) is dict:
-        return (dict,), *get_args(typ)
+        key_typs, val_typs = get_args(typ)
+        return (dict,), key_typs, val_typs
     elif isinstance(typ, UnionType):
         union_key_types = ()
         union_val_types = ()
@@ -42,25 +58,19 @@ def decompose_dict_type(typ) -> tuple[tuple[type] | None, tuple[type] | None, tu
             if member_typ is dict:
                 return (dict,), None, None
             elif get_origin(member_typ) is dict:
-                key_type, val_type = get_args(member_typ)
-                union_key_types += (key_type,)
-                union_val_types += (val_type,)
+                mem_key_typs, mem_val_typs = get_args(member_typ)
+                union_key_types += flatten_type(mem_key_typs)
+                union_val_types += flatten_type(mem_val_typs)
             else:
                 continue
         if union_key_types:
-            return (dict,), union_key_types, union_val_types
+            return (dict,), Union[union_key_types], Union[union_val_types]  # noqa UP007
     return (typ,), None, None
 
 
 def decompose_scalar_type(typ) -> tuple[type]:
     if isinstance(typ, UnionType):
-        union = ()
-        for member_typ in get_args(typ):
-            origin = get_origin(member_typ) or member_typ
-            if origin is dict or origin is list:
-                continue
-            union += (member_typ,)
-        return union
+        return get_args(typ)
     return (typ,)
 
 
@@ -79,11 +89,42 @@ class Loader(_Loader):
     def construct_object(self, node: "Node", deep: bool = False):
         value = super().construct_object(node, deep)
         own_typ = getattr(node, "__expected_own_type__", None)
-        if own_typ is None or isinstance(value, own_typ):
+        if own_typ is None:
             return value
-        if len(own_typ) == 1 and (constructor := self.yaml_type_constructors.get(own_typ[0])):
-            return constructor(self, node)
-        raise Exception
+        constructor_pairs = []
+        for typ in own_typ:
+            try:
+                if isinstance(value, typ):
+                    return value
+            except TypeError:
+                pass
+            if (constructor := self.yaml_type_constructors.get(typ, None)) is None:
+                continue
+            constructor_pairs.append((typ, constructor))
+        if len(constructor_pairs) == 1:
+            return constructor_pairs[0][1](self, node)
+        elif len(constructor_pairs):
+            tag_strs = []
+            for typ, constructor in constructor_pairs:
+                for tag, tag_constructor in self.yaml_constructors.items():
+                    if constructor == tag_constructor:
+                        tag_strs.append(f"{tag} -> {typ}")
+            raise YAMLConstructorMultipleImplicitError(
+                None,
+                None,
+                "Can't determine implicit constructor to use for"
+                f" `{type(value)}` as multiple match. Either specify a tag"
+                f" explicitely from the options `{', '.join(tag_strs)}` or"
+                " update the type.",
+                problem_mark=node.start_mark,
+            )
+        expected_type = getattr(node, "__expected_type__", own_typ)
+        raise YAMLConstructorInvalidTypeError(
+            None,
+            None,
+            f"Type `{type(value)}` does not match expected type" f" `{expected_type}`.",
+            problem_mark=node.start_mark,
+        )
 
     def construct_mapping(self, node: "MappingNode", deep: bool = False) -> dict:
         expected_type = getattr(node, "__expected_type__", None)
@@ -144,9 +185,7 @@ class Loader(_Loader):
 
     def construct_typed_scalar(self, node: "ScalarNode", typ: Any) -> Any:
         scalar_typ = decompose_scalar_type(typ)
-
         node.__expected_own_type__ = scalar_typ
-
         return super().construct_scalar(node)
 
     def construct_typed_collection(self, node: "CollectionNode", typ: Any) -> Any:

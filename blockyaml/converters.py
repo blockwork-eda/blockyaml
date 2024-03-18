@@ -17,6 +17,7 @@ import sys
 from collections.abc import Callable, Iterable
 from dataclasses import _MISSING_TYPE, dataclass, fields
 from pathlib import Path
+from types import EllipsisType
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -35,21 +36,23 @@ try:
     from yaml import CDumper as Dumper
 except ImportError:
     from yaml import SafeDumper as Dumper
-from .loader import Loader
-from .types import (
-    CollectionNode,
-    MappingNode,
-    Node,
-    Representer,
-    ScalarNode,
-    SequenceNode,
-    YAMLConstructorError,
-    YAMLError,
-    YAMLRepresenterError,
+from .exceptions import (
+    YAMLConstructorMissingError,
+    YAMLConstructorNotImplementedError,
+    YAMLRegistrationDuplicateTagError,
+    YAMLRegistrationDuplicateTypeError,
+    YAMLRegistrationTypeError,
+    YAMLRepresenterMissingError,
+    YAMLRepresenterNotImplementedError,
+    YAMLStrictBoolError,
+    YAMLStrictKeyError,
+    YAMLStrictNumberError,
 )
+from .loader import Loader
+from .types import CollectionNode, MappingNode, Node, Representer, ScalarNode, SequenceNode
 
 
-class YAMLConversionError(YAMLError):
+class YAMLConversionError(Exception):
     "Error parsing yaml"
 
     def __init__(self, location: Path | str, msg: str):
@@ -96,7 +99,8 @@ class Converter(abc.ABC, Generic[_Convertable, _Parser]):
 
     def bind_loader(self, loader: type[Loader]):
         self._base_constructor = loader.yaml_constructors.get(self.tag, None)
-        loader.yaml_constructors[self.tag] = self.construct
+        if self.tag is not None:
+            loader.yaml_constructors[self.tag] = self.construct
         if self.infer:
             loader.yaml_type_constructors[self.typ] = self.construct
 
@@ -135,17 +139,19 @@ class Converter(abc.ABC, Generic[_Convertable, _Parser]):
     def construct_node(self, loader: Loader, node: Node) -> _Convertable:
         if self._base_constructor:
             return self._base_constructor(loader, node)
-        raise YAMLConstructorError(
+        raise YAMLConstructorNotImplementedError(
+            None,
+            None,
             f"Converter `{type(self).__name__}` for tag `{self.tag}` doesn't"
             f" provide a method to construct from `{type(node).__name__}`"
             f" with value `{node.value}`.",
-            context_mark=node.start_mark,
+            problem_mark=node.start_mark,
         )
 
     def represent_node(self, representer: Representer, value: _Convertable) -> Node:
         if self._base_representer:
             return self._base_representer(representer, value)
-        raise YAMLRepresenterError(
+        raise YAMLRepresenterNotImplementedError(
             f"Converter `{type(self).__name__}` for tag `{self.tag}` doesn't"
             f" provide a method to represent `{value}`."
         )
@@ -172,17 +178,19 @@ class ImplicitConverter(Converter[_Convertable, _Parser]):
     def construct_node(self, loader: Loader, node: Node) -> _Convertable:
         if constructor := self._base_constructors.get(node.tag, None):
             return constructor(loader, node)
-        raise YAMLConstructorError(
+        raise YAMLConstructorMissingError(
+            None,
+            None,
             f"Can't construct `{node.tag}` as it has no registered converter."
             " If it is meant to be a string, it requires quotes, otherwise a"
             " converter will need to be registered.",
-            context_mark=node.start_mark,
+            problem_mark=node.start_mark,
         )
 
     def represent_node(self, representer: Representer, value: _Convertable) -> _Convertable:
         if base_representer := self._base_representers.get(type(value), None):
             return base_representer(representer, value)
-        raise YAMLRepresenterError(
+        raise YAMLRepresenterMissingError(
             f"Can't represent `{value}` as it has no registered converter."
             " A converter will need to be registered."
         )
@@ -208,9 +216,11 @@ class StrictImplicitConverter(ImplicitConverter[_Convertable, _Parser]):
             for key, _ in node.value:
                 key = self.construct_node(loader, key)
                 if key in seen:
-                    raise YAMLConstructorError(
+                    raise YAMLStrictKeyError(
+                        None,
+                        None,
                         f"Duplicate key '{key}' detected in mapping",
-                        context_mark=node.start_mark,
+                        problem_mark=node.start_mark,
                     )
                 seen.append(key)
         return super().construct_mapping(loader, node)
@@ -219,18 +229,22 @@ class StrictImplicitConverter(ImplicitConverter[_Convertable, _Parser]):
         value = super().construct_scalar(loader, node)
         if self.strict_bools:
             if isinstance(value, bool) and node.value.lower() not in ("true", "false"):
-                raise YAMLConstructorError(
+                raise YAMLStrictBoolError(
+                    None,
+                    None,
                     f"Unsafe bool '{node.value}' detected. Use `true` or"
                     " `false` for bools, or quote if it is intended to be"
                     " a string.",
-                    context_mark=node.start_mark,
+                    problem_mark=node.start_mark,
                 )
         if self.strict_numbers:
             if isinstance(value, int | float) and ":" in node.value:
-                raise YAMLConstructorError(
+                raise YAMLStrictNumberError(
+                    None,
+                    None,
                     f"Unsafe number '{node.value}' detected. This is"
                     " probably meant to be a string, please quote it.",
-                    context_mark=node.start_mark,
+                    problem_mark=node.start_mark,
                 )
         return value
 
@@ -273,28 +287,40 @@ class ConverterRegistry:
     ]:
         ...
 
-    def register(self, converter_convertable, *, tag: str | None = None, infer: bool = False):
+    def register(
+        self, converter_convertable, *, tag: str | None | EllipsisType = ..., infer: bool = False
+    ):
         """
         Register a object for parsing with this parser object.
 
         :param tag: The yaml tag to register as (!ClassName otherwise)
         """
+        try:
+            way_one = issubclass(converter_convertable, Converter)
+        except TypeError:
+            raise YAMLRegistrationTypeError(
+                f"Can't register type `{converter_convertable}` for conversion"
+            ) from None
 
         def wrap(convertable_converter, /):
-            if issubclass(converter_convertable, Converter):
+            if way_one:
                 converter = converter_convertable
                 convertable = convertable_converter
             else:
                 convertable = converter_convertable
                 converter = convertable_converter
 
-            inner_tag = f"!{convertable.__name__}" if tag is None else tag
+            inner_tag = f"!{convertable.__name__}" if tag is ... else tag
 
             if inner_tag in self._registered_tags:
-                raise RuntimeError(f"Converter already exists for tag `{inner_tag}`")
+                raise YAMLRegistrationDuplicateTagError(
+                    f"Converter already exists for tag `{inner_tag}`"
+                )
 
             if convertable in self._registered_typs:
-                raise RuntimeError(f"Converter already exists for type `{convertable}`")
+                raise YAMLRegistrationDuplicateTypeError(
+                    f"Converter already exists for type `{convertable}`"
+                )
 
             self._registry.append((inner_tag, convertable, converter, infer))
             return convertable_converter
@@ -359,7 +385,7 @@ class DataclassConverter(Converter["_DataclassT", _Parser]):
             try:
                 resolved_types = get_type_hints(self.typ, localns=dc_locals)
             except NameError as e:
-                raise YAMLConstructorError(f"{e.name}", context_mark=node.start_mark) from e
+                raise Exception(rf"{e.name}", context_mark=node.start_mark) from e
             for field in fields(self.typ):
                 field.type = key_types[field.name] = resolved_types[field.name]
 

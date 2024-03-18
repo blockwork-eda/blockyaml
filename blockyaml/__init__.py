@@ -13,18 +13,8 @@
 # limitations under the License.
 
 from . import types
-from .converters import (
-    Converter,
-    ConverterRegistry,
-    DataclassConverter,
-    YAMLConstructorError,
-    YAMLConversionError,
-    YAMLDataclassExtraFieldsError,
-    YAMLDataclassFieldError,
-    YAMLDataclassMissingFieldsError,
-    YAMLRepresenterError,
-)
-from .parsers import Parser, SimpleParser, YAMLParserError
+from .converters import Converter, ConverterRegistry, DataclassConverter
+from .parsers import Parser, SimpleParser
 
 assert all(
     (
@@ -32,13 +22,6 @@ assert all(
         ConverterRegistry,
         DataclassConverter,
         types,
-        YAMLConstructorError,
-        YAMLRepresenterError,
-        YAMLConversionError,
-        YAMLParserError,
-        YAMLDataclassFieldError,
-        YAMLDataclassMissingFieldsError,
-        YAMLDataclassExtraFieldsError,
         Parser,
         SimpleParser,
     )

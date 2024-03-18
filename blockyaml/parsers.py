@@ -14,9 +14,12 @@
 
 from collections.abc import Callable
 from pathlib import Path
+from types import EllipsisType
 from typing import Any, Generic, Self, TextIO, overload
 
 from yaml import dump, load
+
+from blockyaml.exceptions import YAMLRegistrationMultipleImplicitError, YAMLRegistrationTypeError
 
 from .converters import (
     Converter,
@@ -25,18 +28,7 @@ from .converters import (
     StrictImplicitConverter,
     _Convertable,
 )
-from .types import Dumper, Loader, YAMLError
-
-
-class YAMLParserError(YAMLError):
-    "Error parsing yaml"
-
-    def __init__(self, location: Path | str, msg: str):
-        self.location = location
-        self.msg = msg
-
-    def __str__(self):
-        return f"{self.location}: {self.msg}"
+from .types import Dumper, Loader
 
 
 class ObjectParser(Generic[_Convertable]):
@@ -138,7 +130,7 @@ class Parser:
         # Bind a primitive converter
         reg_implicit_converter = registry and registry._implicit_converter
         if implicit_converter and reg_implicit_converter:
-            raise ValueError(
+            raise YAMLRegistrationMultipleImplicitError(
                 "Both registry and parser specify"
                 " primitive converter, but only one can"
                 " be specified!"
@@ -174,21 +166,29 @@ class Parser:
     ) -> Callable[[type[Converter[_Convertable, Self]]], type[Converter[_Convertable, Self]]]:
         ...
 
-    def register(self, converter_convertable, *, tag: str | None = None, infer: bool = False):
+    def register(
+        self, converter_convertable, *, tag: str | None | EllipsisType = ..., infer: bool = False
+    ):
         """
         Register a object for parsing with this parser object.
 
         :param tag: The yaml tag to register as (!ClassName otherwise)
         """
+        try:
+            way_one = issubclass(converter_convertable, Converter)
+        except TypeError:
+            raise YAMLRegistrationTypeError(
+                f"Can't register type `{converter_convertable}` for conversion"
+            ) from None
 
         def wrap(convertable_converter, /):
-            if issubclass(converter_convertable, Converter):
+            if way_one:
                 converter = converter_convertable
                 convertable = convertable_converter
             else:
                 convertable = converter_convertable
                 converter = convertable_converter
-            inner_tag = f"!{convertable.__name__}" if tag is None else tag
+            inner_tag = f"!{convertable.__name__}" if tag is ... else tag
             converter_inst = converter(tag=inner_tag, typ=convertable, infer=infer)
             converter_inst.bind_loader(self.loader)
             converter_inst.bind_dumper(self.dumper)
