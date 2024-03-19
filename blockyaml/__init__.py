@@ -22,6 +22,7 @@ from .converters import (
     YAMLDataclassExtraFieldsError,
     YAMLDataclassFieldError,
     YAMLDataclassMissingFieldsError,
+    YAMLRepresenterError,
 )
 from .parsers import Parser, SimpleParser, YAMLParserError
 
@@ -32,6 +33,7 @@ assert all(
         DataclassConverter,
         types,
         YAMLConstructorError,
+        YAMLRepresenterError,
         YAMLConversionError,
         YAMLParserError,
         YAMLDataclassFieldError,

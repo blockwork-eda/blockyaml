@@ -25,6 +25,7 @@ from blockyaml import (
     YAMLDataclassExtraFieldsError,
     YAMLDataclassMissingFieldsError,
     YAMLParserError,
+    YAMLRepresenterError,
 )
 
 
@@ -61,7 +62,69 @@ class TestBasic:
         """
         ) == [4, {"x": 0, "y": [1]}]
 
-    def test_primitive_checking(self):
+    def test_tags(self):
+        parser = Parser()
+
+        # Test a simple string converter
+        @parser.register(str, tag="!Upper")
+        class Capitalise(Converter):
+            def construct_scalar(self, loader, node):
+                return node.value.upper()
+
+        assert parser.parse_str("!Upper mYGarBaGeCASe") == "MYGARBAGECASE"
+
+        # Test converter registry
+        class Rect:
+            def __init__(self, x: int, y: int):
+                self.x = x
+                self.y = y
+
+        @parser.register(Rect)
+        class RectConverter(Converter):
+            def construct_mapping(self, loader, node):
+                mapping = loader.construct_mapping(node, deep=True)
+                return Rect(x=mapping["x"], y=mapping["y"])
+
+            def represent_node(self, dumper, value):
+                return dumper.represent_mapping(self.tag, {"x": value.x, "y": value.y})
+
+        rectyaml = """
+        !Rect
+        x: 2
+        y: 4
+        """
+        rect = parser(Rect).parse_str(rectyaml)
+        assert rect.x == 2 and rect.y == 4
+        assert parser.dump_str(rect) == fixup(rectyaml)
+
+    def test_errors(self):
+        parser = Parser()
+
+        # Test explicit fall-throughs
+        class Registered:
+            ...
+
+        @parser.register(Registered, tag="!Registered")
+        class ConvertRegistered(Converter):
+            ...
+
+        with pytest.raises(YAMLConstructorError):
+            parser.parse_str("!Registered")
+
+        with pytest.raises(YAMLRepresenterError):
+            parser.dump_str(Registered())
+
+        # Test implicit fall throughs
+        class Unregistered:
+            ...
+
+        with pytest.raises(YAMLConstructorError):
+            parser.parse_str("!Unregistered")
+
+        with pytest.raises(YAMLRepresenterError):
+            parser.dump_str(Unregistered())
+
+    def test_strict_implicit_converter(self):
         parser = Parser()
 
         with pytest.raises(YAMLConstructorError):
@@ -82,16 +145,8 @@ class TestBasic:
         with pytest.raises(YAMLConstructorError):
             parser.parse_str("!.html")
 
-    def test_tags(self):
+    def test_dataclass_converter(self):
         parser = Parser()
-
-        # Test a simple string converter
-        @parser.register(str, tag="!Upper")
-        class Capitalise(Converter):
-            def construct_scalar(self, loader, node):
-                return node.value.upper()
-
-        assert parser.parse_str("!Upper mYGarBaGeCASe") == "MYGARBAGECASE"
 
         # Test a dataclass converter
         @parser.register(DataclassConverter)
@@ -148,27 +203,3 @@ class TestBasic:
             parser(Date).parse_str("hello")
 
         assert isinstance(parser(Date).parse_str(dateyaml), Date)
-
-        # Test converter registry
-        class Rect:
-            def __init__(self, x: int, y: int):
-                self.x = x
-                self.y = y
-
-        @parser.register(Rect)
-        class RectConverter(Converter):
-            def construct_mapping(self, loader, node):
-                mapping = loader.construct_mapping(node, deep=True)
-                return Rect(x=mapping["x"], y=mapping["y"])
-
-            def represent_node(self, dumper, value):
-                return dumper.represent_mapping(self.tag, {"x": value.x, "y": value.y})
-
-        rectyaml = """
-        !Rect
-        x: 2
-        y: 4
-        """
-        rect = parser(Rect).parse_str(rectyaml)
-        assert rect.x == 2 and rect.y == 4
-        assert parser.dump_str(rect) == fixup(rectyaml)

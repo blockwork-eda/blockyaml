@@ -33,9 +33,10 @@ if TYPE_CHECKING:
 
 try:
     from yaml import CDumper as Dumper
-    from yaml import CLoader as Loader
+    from yaml import CSafeLoader as Loader
 except ImportError:
-    from yaml import Dumper, Loader
+    from yaml import SafeDumper as Dumper
+    from yaml import SafeLoader as Loader
 
 from .types import (
     CollectionNode,
@@ -133,18 +134,26 @@ class Converter(abc.ABC, Generic[_Convertable, _Parser]):
     def construct_node(self, loader: Loader, node: Node) -> _Convertable:
         if self._base_constructor:
             return self._base_constructor(loader, node)
-        raise NotImplementedError
+        raise YAMLConstructorError(
+            f"Converter `{type(self).__name__}` for tag `{self.tag}` doesn't"
+            f" provide a method to construct from `{type(node).__name__}`"
+            f" with value `{node.value}`.",
+            context_mark=node.start_mark,
+        )
 
     def represent_node(self, representer: Representer, value: _Convertable) -> Node:
         if self._base_representer:
             return self._base_representer(representer, value)
-        raise NotImplementedError
+        raise YAMLRepresenterError(
+            f"Converter `{type(self).__name__}` for tag `{self.tag}` doesn't"
+            f" provide a method to represent `{value}`."
+        )
 
 
-class PrimitiveConverter(Converter[_Convertable, _Parser]):
+class ImplicitConverter(Converter[_Convertable, _Parser]):
     """
-    Converter for primitive objects, allows for sanity checks to be
-    imposed on the data beyond standard YAML syntax.
+    Converter for values which are implicitly converted, allows for sanity
+    checks to be imposed on the data beyond standard YAML syntax.
     """
 
     def bind_loader(self, loader: type[Loader]):
@@ -163,9 +172,8 @@ class PrimitiveConverter(Converter[_Convertable, _Parser]):
         if constructor := self._base_constructors.get(node.tag, None):
             return constructor(loader, node)
         raise YAMLConstructorError(
-            f"Got tag `{node.tag}` with no registered"
-            " converter. If it is meant to be a string"
-            " it requires quotes, otherwise a"
+            f"Can't construct `{node.tag}` as it has no registered converter."
+            " If it is meant to be a string, it requires quotes, otherwise a"
             " converter will need to be registered.",
             context_mark=node.start_mark,
         )
@@ -174,16 +182,16 @@ class PrimitiveConverter(Converter[_Convertable, _Parser]):
         if base_representer := self._base_representers.get(type(value), None):
             return base_representer(representer, value)
         raise YAMLRepresenterError(
-            f"Got type `{type(value)}` without a"
-            " registered converter. A converter will"
-            " need to be registered."
+            f"Can't represent `{value}` as it has no registered converter."
+            " A converter will need to be registered."
         )
 
 
 @dataclass(kw_only=True)
-class SensiblePrimitives(PrimitiveConverter[_Convertable, _Parser]):
+class StrictImplicitConverter(ImplicitConverter[_Convertable, _Parser]):
     """
-    Converter for primitive objects with sensible checking by default.
+    Converter for values which are implicitly converted, with stricter checking
+    by default.
     """
 
     strict_keys: bool = True
@@ -232,8 +240,8 @@ class ConverterRegistry:
     can be used to initialise a Parser object.
     """
 
-    def __init__(self, primitive_converter: PrimitiveConverter | None = None):
-        self._primitive_converter = primitive_converter
+    def __init__(self, implicit_converter: ImplicitConverter | None = None):
+        self._implicit_converter = implicit_converter
         self._registered_tags: set[str] = set()
         self._registered_typs: set[Any] = set()
         self._registry: list[tuple[str, Any, type[Converter]]] = []
